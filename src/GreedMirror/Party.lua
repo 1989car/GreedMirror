@@ -6,6 +6,7 @@ local ADDON, GM = ...
 
 local Party = {}
 GM.Party = Party
+GM.Require("Party", { "DB", "I18n", "Rate" })
 
 local DB, I18n, Rate = GM.DB, GM.I18n, GM.Rate
 
@@ -58,8 +59,9 @@ function Party.Notify(entry)
 end
 
 -- 判定为极高时写入名单（跨会话保留）。
+-- 只做入库，返回 entry, isFirst；是否提示、何时提示由 OnScanResult 决定。
 function Party.Record(guid, identity, row, result)
-    if not Rate.IsHighRate(result) then return false end
+    if not Rate.IsHighRate(result) then return nil, false end
     local existing = DB.WatchGet(guid)
     local entry = {
         guid = guid,
@@ -75,14 +77,24 @@ function Party.Record(guid, identity, row, result)
         at = time and time() or 0,
     }
     DB.WatchPut(guid, entry)
-    -- 只在这个玩家首次进入名单时提示一次，避免每次悬停都刷屏
-    if not existing then
+    return entry, existing == nil
+end
+
+-- 扫描结果 → 名单策略（唯一入口，Core 的扫描回调只转发到这里）：
+--   1) 需求率极高 → 入库；
+--   2) 首次进入名单 → 聊天提示一次（避免每次悬停刷屏）；
+--   3) 开着队伍提醒且该玩家在队伍里 → Notify（自带 10 分钟冷却）。
+function Party.OnScanResult(guid, row, status)
+    if status ~= "READY" or type(row) ~= "table" or type(guid) ~= "string" then return end
+    local result = Rate.Evaluate(row)
+    local entry, isFirst = Party.Record(guid, { name = row.name, realm = row.realm }, row, result)
+    if not entry then return end
+    if isFirst then
         GM.Print(I18n.T("CMD_WATCH_ADDED", entry.name, entry.rate))
     end
-    if DB.Get("partyAlert") == true and Party.IsInGroup(guid) then
+    if DB.Get("partyAlert") == true and Party.IsInGroup(entry.guid) then
         Party.Notify(entry)
     end
-    return true
 end
 
 function Party.IsInGroup(guid)

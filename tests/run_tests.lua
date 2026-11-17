@@ -187,16 +187,111 @@ check("guid 不符不入缓存", DB.CacheGet("Player-9") == nil)
 -- ------------------------------------------------------------ Party 名单记录
 local Party = GM.Party
 local identity = { guid = "Player-hi", name = "李四", realm = "测试服" }
-local rowHi = { need = 60, greed = 40, dungeons = 10 } -- R=100 >= T=54, P=60% → 红
+local rowHi = { need = 60, greed = 40, dungeons = 10, name = "李四", realm = "测试服" } -- R=100 >= T=54, P=60% → 红
 local resultHi = R.Evaluate(rowHi)
 check("构造红档", resultHi.band == "red")
 Party.Record("Player-hi", identity, rowHi, resultHi)
 check("极高入名单", DB.WatchGet("Player-hi") ~= nil)
 check("名单 rate", DB.WatchGet("Player-hi").rate == 60)
+check("Record 返回 entry", (select(1, Party.Record("Player-hi", identity, rowHi, resultHi))) ~= nil)
+check("Record 非首次", (select(2, Party.Record("Player-hi", identity, rowHi, resultHi))) == false)
 
 local rowLow = { need = 20, greed = 0, dungeons = 10 }
 Party.Record("Player-low", identity, rowLow, R.Evaluate(rowLow))
 check("放弃型不入名单", DB.WatchGet("Player-low") == nil)
+
+-- ------------------------------------------------------------ OnScanResult 策略（入库 + 首录提示 + 组队提醒）
+DB.WatchRemove("Player-hi")
+local printed = {}
+local realPrint = print
+print = function(text) printed[#printed + 1] = tostring(text) end
+local function printedCount(needle)
+    local count = 0
+    for _, line in ipairs(printed) do
+        if line:find(needle, 1, true) then count = count + 1 end
+    end
+    return count
+end
+
+Party.OnScanResult("Player-hi", rowHi, "READY")
+check("OnScanResult 入名单", DB.WatchGet("Player-hi") ~= nil)
+check("首录提示一次", printedCount("已记录高需求率玩家") == 1, tostring(printedCount("已记录高需求率玩家")))
+Party.OnScanResult("Player-hi", rowHi, "READY")
+check("重复查询不重复提示", printedCount("已记录高需求率玩家") == 1)
+Party.OnScanResult("Player-low", rowLow, "READY")
+check("低需求率不入名单", DB.WatchGet("Player-low") == nil)
+
+-- partyAlert 开 + 在队伍里 → Notify（聊天框单条提醒，内部自带 10 分钟冷却）
+stub.units.party3 = { guid = "Player-hi", name = "李四", player = true }
+local noticePrints = 0
+print = function(text)
+    if tostring(text):find("需求率 60%%（记录于", 1, false) then noticePrints = noticePrints + 1 end
+end
+Party.OnScanResult("Player-hi", rowHi, "READY")
+check("队伍内触发组队提醒", noticePrints >= 1, tostring(noticePrints))
+print = realPrint
+stub.units.party3 = nil
+
+-- ------------------------------------------------------------ 名单呈现 interface（I18n.WatchRowText）
+local watchLine = GM.I18n.WatchRowText(DB.WatchGet("Player-hi"))
+check("WatchRowText 含名字", watchLine:find("李四", 1, true) ~= nil, watchLine)
+check("WatchRowText 无种族时空括号消失",
+    GM.I18n.WatchRowText({ name = "王五", rate = 55, need = 5, greed = 5 }):find("（）", 1, true) == nil)
+check("WatchRowText 非表返回空串", GM.I18n.WatchRowText(nil) == "")
+
+-- ------------------------------------------------------------ Tooltip 聊天文本层
+local TT2 = GM.Tooltip
+check("CountsText 完整", TT2.CountsText(rowHi) == "需求 60 · 贪婪 40 · 副本 10", TT2.CountsText(rowHi))
+check("CountsText 缺失用问号", TT2.CountsText({ greed = 1, dungeons = 1 }) == "需求 ? · 贪婪 1 · 副本 1",
+    TT2.CountsText({ greed = 1, dungeons = 1 }))
+check("ChatVerdict 红档", TT2.ChatVerdict(rowHi) == "极高 60%", TT2.ChatVerdict(rowHi))
+check("NodataReport 完整为 nil", TT2.NodataReport(rowHi) == nil)
+check("NodataReport 缺字段给建议", TT2.NodataReport({ need = nil, greed = 1, dungeons = 1 }) ~= nil)
+
+-- ------------------------------------------------------------ Scan.Transition 状态机入口
+do
+    local effects = Scan.effects
+    -- timeout：把 in-flight 的开始时间拨回超时之前
+    local entry = { guid = "Player-t", unit = "target", manual = false, started = effects.now() - 10 }
+    Scan.machine.state = "INFLIGHT"
+    Scan.machine.inflight = entry
+    Scan.machine.ownsComparison = true
+    local before = Scan.timeouts
+    Scan.Transition("timeout")
+    check("Transition timeout 收割", Scan.State() == "IDLE" and Scan.timeouts == before + 1)
+
+    -- cancel：清空排队并通知（手动请求保留）
+    local seen = {}
+    Scan.OnReady(function(guid, row, status) seen[#seen + 1] = { guid = guid, status = status } end)
+    local q = Scan.machine.queue
+    q[#q + 1] = { guid = "Player-q1", manual = false }
+    q[#q + 1] = { guid = "Player-q2", manual = true }
+    Scan.Transition("cancel", { status = "CANCELLED", keepManual = true })
+    check("Transition cancel 清队", #Scan.machine.queue == 0)
+    check("Transition cancel 通知非手动", seen[1] and seen[1].guid == "Player-q1"
+        and seen[1].status == "CANCELLED", tostring(seen[1] and seen[1].guid))
+    check("Transition cancel 保留手动", seen[2] == nil)
+
+    -- request：NPC 拒绝
+    local rowN, statusN = Scan.Transition("request", { unit = "npc1" })
+    check("Transition request NPC", rowN == nil and statusN == "NPC", tostring(statusN))
+
+    -- effects 可替换：战斗开关走注入点
+    local origCombat = effects.inCombat
+    effects.inCombat = function() return true end
+    local _, statusC = Scan.Request("target", {}) -- 被动悬停
+    check("effects 注入战斗拒绝", statusC == "COMBAT", tostring(statusC))
+    effects.inCombat = origCombat
+    Scan.Cancel("CANCELLED")
+end
+
+-- ------------------------------------------------------------ GM.Require 契约
+do
+    local ok, err = pcall(GM.Require, "Demo", { "NotExist" })
+    check("Require 缺依赖报错", ok == false and tostring(err):find("Demo") ~= nil, tostring(err))
+    ok, err = pcall(GM.Require, "Demo", { "DB" })
+    check("Require 有依赖通过", ok == true, tostring(err))
+end
 
 -- ------------------------------------------------------------ Tooltip 行所有权
 local TT = GM.Tooltip

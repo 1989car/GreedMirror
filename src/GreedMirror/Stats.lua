@@ -11,6 +11,7 @@ local ADDON, GM = ...
 
 local Stats = {}
 GM.Stats = Stats
+GM.Require("Stats")
 
 local DASH = "\226\128\148" -- em dash
 

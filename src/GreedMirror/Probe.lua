@@ -9,6 +9,7 @@ local ADDON, GM = ...
 
 local Probe = {}
 GM.Probe = Probe
+GM.Require("Probe", { "Stats", "DB", "Scan" })
 
 local Stats, DB, Scan = GM.Stats, GM.DB, GM.Scan
 

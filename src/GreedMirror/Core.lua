@@ -5,6 +5,18 @@ local ADDON, GM = ...
 GM.ADDON = ADDON or "GreedMirror"
 GM.VERSION = "1.0.0"
 
+-- 显式依赖契约：模块加载顺序由 GreedMirror.toc 保证，违反契约时在加载期直接报错，
+-- 而不是等运行期某个 GM.X 为 nil 才在玩家面前炸出来。
+function GM.Require(name, deps)
+    for _, dep in ipairs(deps or {}) do
+        if not GM[dep] then
+            error(string.format("GreedMirror: 模块 %s 缺少依赖 %s（请检查 GreedMirror.toc 的加载顺序）",
+                tostring(name), tostring(dep)), 0)
+        end
+    end
+    return GM
+end
+
 -- 三个统计项（暴雪成就/统计 ID，见 /greed probe 自检）
 GM.STAT = { need = 1044, greed = 1043, dungeons = 932 }
 GM.STAT_RESOLVED = nil   -- 运行时自检/自动发现后的实际 ID
@@ -75,11 +87,14 @@ safeRegister("PLAYER_LOGIN")
 local reportRow
 local pendingTarget = nil
 
--- 扫描结果回调：
---   1) 回显 /greed target 的查询结果（此前只打印“正在读取…”，结果永远不会输出）
---   2) 把查询到的高需求率玩家写入名单（此前 Party.Record 从未被调用；
---      按用户要求，凡查询过且需求率极高的玩家都记录，不限是否在队伍里）
+-- 扫描结果回调（Core 只保留命令回显这一件事）：
+--   1) 名单入库与组队提醒 → Party.OnScanResult（业务策略在 Party）
+--   2) /greed target 的查询结果回显 → reportRow（展示在 Tooltip 的文本层）
 local function onScanResult(guid, row, status)
+    if GM.Party and GM.Party.OnScanResult then
+        GM.Party.OnScanResult(guid, row, status)
+    end
+
     if pendingTarget and guid and guid == pendingTarget.guid then
         local name = pendingTarget.name
         pendingTarget = nil
@@ -89,12 +104,6 @@ local function onScanResult(guid, row, status)
             GM.Print(GM.Tooltip.StatusText(status))
         end
     end
-
-    if status ~= "READY" or not row then return end
-    if not (GM.Party and GM.Party.Record) then return end
-    local result = GM.Rate.Evaluate(row)
-    if not GM.Rate.IsHighRate(result) then return end
-    GM.Party.Record(guid, { name = row.name, realm = row.realm }, row, result)
 end
 
 local function setup()
@@ -189,24 +198,18 @@ local function partyUnitByName(name)
     return nil
 end
 
+-- 聊天输出只有排版：计数与判定文案全部来自 Tooltip 的文本层
+-- （“读不到用 ? 占位”“数据不完整分层提示”的规则在 Tooltip 里只写一遍）。
 reportRow = function(row, prefix, name)
-    local result = GM.Rate.Evaluate(row)
-    -- 读不到的字段用 ? 占位，绝不用 0 冒充（0 是有效数值，会误导）
-    local function show(value)
-        if GM.Stats.IsCount(value) then return tostring(value) end
-        return GM.I18n.T("VALUE_MISSING")
-    end
-    local need, greed, dungeons = show(row.need), show(row.greed), show(row.dungeons)
-    local verdict = GM.Tooltip.VerdictText(result, row)
+    local counts = GM.Tooltip.CountsText(row)
+    local verdict = GM.Tooltip.ChatVerdict(row)
     if name then
-        GM.Print(string.format(prefix, name, need, greed, dungeons, verdict))
+        GM.Print(string.format(prefix, name, counts, verdict))
     else
-        GM.Print(string.format(prefix, need, greed, dungeons, verdict))
+        GM.Print(string.format(prefix, counts, verdict))
     end
-    if result.status == "nodata" then
-        local detail = GM.Tooltip.NodataDetail(GM.Tooltip.MissingInfo(row))
-        if detail then GM.Print(detail) end
-    end
+    local detail = GM.Tooltip.NodataReport(row)
+    if detail then GM.Print(detail) end
 end
 
 local function handleCommand(text)
@@ -293,10 +296,7 @@ local function handleCommand(text)
             return
         end
         for _, entry in ipairs(list) do
-            GM.Print(GM.I18n.T("WATCH_ROW", tostring(entry.name),
-                GM.I18n.RaceClassText(entry.race, entry.class),
-                entry.rate or 0, entry.need or 0, entry.greed or 0,
-                date and date("%Y-%m-%d", entry.at) or ""))
+            GM.Print(GM.I18n.WatchRowText(entry))
         end
         return
     end

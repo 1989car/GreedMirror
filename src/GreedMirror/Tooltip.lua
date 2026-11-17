@@ -6,6 +6,7 @@ local ADDON, GM = ...
 
 local Tooltip = {}
 GM.Tooltip = Tooltip
+GM.Require("Tooltip", { "Stats", "Scan", "Rate", "DB", "I18n" })
 
 local Stats, Scan, Rate, DB, I18n = GM.Stats, GM.Scan, GM.Rate, GM.DB, GM.I18n
 
@@ -185,6 +186,32 @@ local function ageText(seconds)
     return string.format(I18n.T("AGE_TEXT_MIN"), math.floor(seconds / 60))
 end
 
+-- ------------------------------------------------------------ 聊天文本层
+-- /greed self、/greed target（Core.lua reportRow）使用的文本接口。
+-- “读不到的字段用 ? 占位，绝不用 0 冒充”的规则在这里与提示框共用同一份实现。
+
+-- 计数摘要：需求 ? · 贪婪 12 · 副本 30
+function Tooltip.CountsText(row)
+    local function show(value)
+        if Stats.IsCount(value) then return tostring(value) end
+        return I18n.T("VALUE_MISSING")
+    end
+    if type(row) ~= "table" then row = {} end
+    return string.format(I18n.T("COUNTS_CHAT"), show(row.need), show(row.greed), show(row.dungeons))
+end
+
+-- 判定短语（内部自行评估，调用方不需要再碰 Rate）
+function Tooltip.ChatVerdict(row)
+    return Tooltip.VerdictText(Rate.Evaluate(row), row)
+end
+
+-- 数据不可读时的第二行说明；数据完整时返回 nil
+function Tooltip.NodataReport(row)
+    local result = Rate.Evaluate(row)
+    if result.status ~= "nodata" then return nil end
+    return Tooltip.NodataDetail(Tooltip.MissingInfo(row))
+end
+
 -- 生成要追加的行：{ {text=..., color=...}, ... }
 function Tooltip.BuildLines(row, result, guid)
     local lines = {}
@@ -308,7 +335,10 @@ function Tooltip.PaintStatus(tooltip, status, identity)
     paint(tooltip, nil, identity, status)
 end
 
-local function refresh(guid, row, status)
+-- 刷新单入口：扫描结果（OnReady）与看门狗（watchdog）都走这里。
+-- 按 shown 记录重新解析当前提示框对应的单位，再重画；
+-- 目标已变化、提示框已隐藏等情况都直接跳过。
+function Tooltip.Refresh(guid, row, status)
     if drawing or not shown or Stats.IsSecret(guid) or not equal(shown.guid, guid) then return end
     local tooltip = shown.tooltip
     local ok, visible = Stats.SafeCall(tooltip.IsShown, tooltip)
@@ -362,7 +392,7 @@ end
 function Tooltip.Init()
     if installed then return end
     installed = true
-    Scan.OnReady(refresh)
+    Scan.OnReady(Tooltip.Refresh)
 
     if GameTooltip and type(GameTooltip.HookScript) == "function" then
         -- 热加载时上一份模块可能已经挂过钩子，先摘掉，避免同一个提示框被画两遍
@@ -421,11 +451,9 @@ function Tooltip.Init()
         local function watchdog()
             if not GM.IsEnabled() or DB.Get("tooltip") ~= true then return end
             if not GameTooltip or not GameTooltip:IsShown() then return end
-            local unit = tooltipUnit(GameTooltip)
-            if not unit then return end
-            local identity = Stats.UnitIdentity(unit)
-            if not identity then return end
-            if shown and equal(shown.guid, identity.guid) and rowsAlive(shown) then return end
+            if shown and rowsAlive(shown) then return end
+            -- 还没画过（或我们画的行被游戏清掉了）：交给唯一入口 OnUnit 重画。
+            -- 看门狗不再自己解析单位/身份，画与不画的判断只有 OnUnit 一份。
             Tooltip.OnUnit(GameTooltip)
         end
         local function loop()

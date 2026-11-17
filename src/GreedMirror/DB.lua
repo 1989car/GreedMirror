@@ -5,6 +5,7 @@ local ADDON, GM = ...
 
 local DB = {}
 GM.DB = DB
+GM.Require("DB")
 
 DB.DEFAULTS = {
     enabled = true,      -- 插件总开关

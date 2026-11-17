@@ -4,6 +4,7 @@ local ADDON, GM = ...
 
 local I18n = {}
 GM.I18n = I18n
+GM.Require("I18n")
 
 I18n.zhCN = {
     -- 名称与提示
@@ -32,6 +33,7 @@ I18n.zhCN = {
 
     -- 明细
     COUNT_LINE = "需求 %s · 贪婪 %s · 掷骰 %s · 副本 %s",
+    COUNTS_CHAT = "需求 %s · 贪婪 %s · 副本 %s",
     RATE_LINE = "需求率 %d%%",
     CACHED_TAG = "缓存",
     AGE_TEXT = "%d 秒前",
@@ -113,8 +115,8 @@ I18n.zhCN = {
     CMD_PARTY_NONE = "当前不在 5 人小队中。",
     CMD_WATCH_CLEARED = "已清空高需求率名单。",
     CMD_CACHE_CLEARED = "已清空统计缓存。",
-    CMD_SELF_RESULT = "你的统计：需求 %s · 贪婪 %s · 副本 %s → %s",
-    CMD_TARGET_RESULT = "%s 的统计：需求 %s · 贪婪 %s · 副本 %s → %s",
+    CMD_SELF_RESULT = "你的统计：%s → %s",
+    CMD_TARGET_RESULT = "%s 的统计：%s → %s",
     CMD_PROBE_DONE = "自检输出见上（/greed probe）。",
     CMD_SETTINGS_HINT = "设置页可在“游戏 → 插件 → 贪婪镜”中打开。",
     CMD_SETTINGS_OPEN = "已打开设置页。",
@@ -149,4 +151,16 @@ function I18n.RaceClassText(race, class)
     if type(class) == "string" and class ~= "" then parts[#parts + 1] = class end
     if #parts == 0 then return "" end
     return I18n.T("RACE_CLASS", table.concat(parts, " "))
+end
+
+-- 名单条目 → 一行展示文本。
+-- 名单呈现的唯一格式化点：/greed watch（Core）与设置页名单（Settings）都用它，
+-- 改列格式只需要改这一个函数。
+function I18n.WatchRowText(entry)
+    if type(entry) ~= "table" then return "" end
+    local stamp = ""
+    if type(entry.at) == "number" and date then stamp = date("%Y-%m-%d", entry.at) end
+    return I18n.T("WATCH_ROW", tostring(entry.name or "?"),
+        I18n.RaceClassText(entry.race, entry.class),
+        entry.rate or 0, entry.need or 0, entry.greed or 0, stamp)
 end

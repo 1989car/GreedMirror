@@ -11,6 +11,7 @@ local ADDON, GM = ...
 
 local Rate = {}
 GM.Rate = Rate
+GM.Require("Rate")
 
 local DEFAULTS = {
     activeMul = 5.4,       -- 活跃度门槛系数：R 必须 >= activeMul * E

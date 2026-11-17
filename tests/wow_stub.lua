@@ -30,6 +30,7 @@ function proto:SetJustifyH() end
 function proto:SetWidth() end
 function proto:SetHeight() end
 function proto:SetToplevel() end
+function proto:SetFrameStrata() end
 function proto:SetChecked(v) self.__checked = v end
 function proto:GetChecked() return self.__checked end
 function proto:Raise() end
@@ -40,6 +41,14 @@ function proto:IsEventRegistered(event) return self.__events[event] == true end
 function proto:SetScript(key, fn) self.__scripts[key] = fn end
 function proto:GetScript(key) return self.__scripts[key] end
 function proto:HookScript(key, fn) self.__hooks[key] = fn end
+function proto:UnhookScript(key, fn)
+    if self.__hooks[key] == fn then self.__hooks[key] = nil end
+end
+function proto:EnableMouse() end
+function proto:EnableMouseWheel() end
+function proto:SetShown(v) self.__shown = v and true or false end
+function proto:ClearAllPoints() end
+function proto:SetAllPoints() end
 function proto:CreateFontString() return newFrame("FontString") end
 function proto:SetParent(parent) self.__parent = parent end
 function proto:GetParent() return self.__parent end
@@ -225,11 +234,29 @@ function _G.issecretvalue(value) return stub.secretValues[value] == true end
 
 _G.SlashCmdList = {}
 
+-- 时区/日历
+function _G.date(fmt, t) return os.date(fmt, t) end
+function _G.IsLoggedIn() return false end
+
+-- 定时器桩：After 只登记不触发，避免测试中无限制的回调链
+stub.timers = {}
+_G.C_Timer = {
+    After = function(delay, fn) stub.timers[#stub.timers + 1] = { delay = delay, fn = fn } end,
+}
+
+-- 阵营相关：默认无敌对关系
+function _G.UnitFactionGroup(unit) return "Alliance", "联盟" end
+function _G.UnitIsEnemy(unit, other) return false end
+function _G.UnitRace(unit)
+    local info = stub.units[unit]
+    return info and info.race
+end
+
 -- ------------------------------------------------------------ 装载插件
 -- 按 TOC 顺序加载，返回共享的 GM 表。
 function stub.loadAddon(root)
     local GM = {}
-    local order = { "I18n", "Core", "DB", "Rate", "Stats", "Scan", "Tooltip", "Settings", "Party", "Probe" }
+    local order = { "Core", "I18n", "DB", "Rate", "Stats", "Scan", "Tooltip", "Settings", "Party", "Probe" }
     for _, name in ipairs(order) do
         local path = root .. "/" .. name .. ".lua"
         local chunk, err = loadfile(path)

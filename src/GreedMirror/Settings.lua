@@ -13,6 +13,7 @@ local ADDON, GM = ...
 
 local Settings = {}
 GM.Settings = Settings
+GM.Require("Settings", { "DB", "I18n" })
 
 local DB, I18n = GM.DB, GM.I18n
 
@@ -87,13 +88,7 @@ end
 
 -- ------------------------------------------------------------ 名单列表
 
-local function watchEntryText(entry)
-    local stamp = ""
-    if type(entry.at) == "number" and date then stamp = date("%Y-%m-%d", entry.at) end
-    return I18n.T("WATCH_ROW", tostring(entry.name or "?"),
-        I18n.RaceClassText(entry.race, entry.class),
-        entry.rate or 0, entry.need or 0, entry.greed or 0, stamp)
-end
+-- 行文案统一走 I18n.WatchRowText（与 /greed watch 同一格式化点）
 
 -- 重画名单：每次滚动、刷新、增删记录后都调用
 local function renderWatchList()
@@ -109,7 +104,7 @@ local function renderWatchList()
         if fs then
             local entry = list[watchScroll + i]
             if entry then
-                fs:SetText(watchEntryText(entry))
+                fs:SetText(I18n.WatchRowText(entry))
             else
                 fs:SetText("")
             end
