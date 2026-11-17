@@ -1,6 +1,9 @@
 # 第三方 wheel（与插件源码无关）
 *.whl
 
+# 本地研究资料
+.research/
+
 # 构建产物
 dist/
 
