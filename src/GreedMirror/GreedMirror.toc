@@ -1,0 +1,20 @@
+## Interface: 16001
+## Title: 贪婪镜
+## Notes: 显示战利品需求率统计（需求/贪婪/进本次数）。纯本地展示，不联网、不上传、不广播。
+## Notes-zhCN: 贪婪镜：显示战利品需求率统计（需求/贪婪/进本次数）。仅本地展示，不联网、不上传、不广播。
+## Author: GreedMirror
+## Version: 1.0.0
+## SavedVariables: GreedMirrorDB
+## AllowLoadGameType: camelot
+## DefaultState: enabled
+
+Core.lua
+I18n.lua
+DB.lua
+Rate.lua
+Stats.lua
+Scan.lua
+Tooltip.lua
+Settings.lua
+Party.lua
+Probe.lua
